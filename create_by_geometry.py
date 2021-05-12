@@ -64,31 +64,43 @@ def clip(img,wkt,output):
 
 gdf = gpd.read_file(shp)
 
-
+# Creating a loop on each feature
 for g in gdf.index:
+    #Getting geometry
     geometry = gdf['geometry'][g]
     ident = gdf['gppd_idnr'][g]
     
+    # Looping through all the images downloaded and preprocessed.
     for i in os.listdir(images):
         if i.endswith(".SAFE"):
             path = os.path.join(images,i)
+            # Reading a band to be able to see if the geometry and the image intersects
             b3 = gdal.Open(find_band(path,'B03_10m'))
             gdf.to_crs(b3.GetProjection(),inplace=True)
             polygon = get_bounds(b3)
-            
+            # if the geometry intersects with the image:
             if polygon.contains(geometry):
+                # getting the bands
+                b2 = gdal.Open(find_band(path,'B02_10m'))
+                b4 = gdal.Open(find_band(path,'B04_10m'))
                 b8 = gdal.Open(find_band(path,'B08_10m'))
-                ar3 = b3.ReadAsArray().astype('float32')
-                ar8 = b8.ReadAsArray().astype('float32')
 
-                array = (ar3-ar8)/(ar3+ar8)
+                # These commented lines are if you with to use water index
+                # ar3 = b3.ReadAsArray().astype('float32') 
+                # ar8 = b8.ReadAsArray().astype('float32')
+                ar2 = b2.ReadAsArray()
+                ar3 = b3.ReadAsArray()
+                ar4 = b4.ReadAsArray()
+                ar8 = b8.ReadAsArray()
+                # array = (ar3-ar8)/(ar3+ar8)
                 
-                out = path+"_NDWI.tif"
+                # out = path+"_NDWI.tif"
+                out = path+".tif"
                 if not os.path.exists(out):
-                    create_img(out,b3,[array],gdal.GDT_Float32)
-                
+                    # create_img(out,b3,[array],gdal.GDT_Float32)
+                    create_img(out,b3,[ar2,ar3,ar4,ar8],gdal.GDT_UInt16)
+
                 output = os.path.join(outpath,ident+'_'+i[11:19]+'.tif')
                 if not os.path.exists(output):
-                
                     geo = get_bounds_shp(geometry)
                     clip(out,geo,output)
