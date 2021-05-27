@@ -67,7 +67,8 @@ for i in tqdm(gdf.index):
 
             if polygon.contains(geom):
                 output = os.path.join(outpath,os.path.basename(file))
-                clip(file,geom,output)
+                if os.path.exists(output):
+                    clip(file,geom,output)
 
 
 
