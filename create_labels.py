@@ -29,7 +29,7 @@ def rasterize(img,shp,output,atribute,nodata=''):
     # -> atribute: the columns with the information to convert the data, if you have a column with numbers, the numbers will be converted to pixel values
     # -> nodata: The values that will be ignored.
     data = gdal.Open(img, gdalconst.GA_ReadOnly)
-    geo_transform = data.GetGeoTransform()
+    geo_transform = data.GetGeoTransform() #Geotransform information you can get from the report
     proj=data.GetProjection()
     x_min = geo_transform[0]
     y_max = geo_transform[3]
@@ -37,20 +37,24 @@ def rasterize(img,shp,output,atribute,nodata=''):
     y_min = y_max + geo_transform[5] * data.RasterYSize
     x_res = data.RasterXSize
     y_res = data.RasterYSize
-    mb_v = ogr.Open(shp)
-    mb_l = mb_v.GetLayer()
+    vector = ogr.Open(shp)
+    layer = vector.GetLayer()
     pixel_width = geo_transform[1]
-    target_ds = gdal.GetDriverByName('GTiff').Create(output, x_res, y_res, 1, gdal.GDT_Byte)
-    target_ds.SetGeoTransform((x_min, pixel_width, 0, y_min, 0, pixel_width))
-    band = target_ds.GetRasterBand(1)
+    # Creating a new empty file
+    target_datasource = gdal.GetDriverByName('GTiff').Create(output, x_res, y_res, 1, gdal.GDT_Byte) #gdal.GDT_Byte means 8bit image
+    target_datasource.SetGeoTransform((x_min, pixel_width, 0, y_min, 0, pixel_width))
+    band = target_datasource.GetRasterBand(1)
     if nodata!='':
         band.SetNoDataValue(nodata)
     band.FlushCache()
-    target_ds.SetProjection(proj)
-    gdal.RasterizeLayer(target_ds, [1], mb_l, options=["ATTRIBUTE="+atribute])
-    target_ds = None
+    target_datasource.SetProjection(proj)
+    gdal.RasterizeLayer(target_datasource, [1], layer, options=["ATTRIBUTE="+atribute])
+    #The reason why we set the "target_datasource" variable as None is that sometimes this is needed to save the file locally.
+    target_datasource = None
 
 def create_img(output,img,array,dtype = gdal.GDT_UInt16):
+    # This function was created just to explain how to create a new image with the geographic information
+    # To copy an image, you can use the function "gdal.CreateCopy()"
     driver = gdal.GetDriverByName("GTiff")
     dst = driver.Create(output,img.RasterXSize,img.RasterYSize,len(array),dtype)
     for i in range(len(array)):
@@ -70,10 +74,10 @@ def get_bounds(img):
 # looping through all the images
 for i in tqdm(os.listdir(path)):
     if i.endswith(".tif"):
-        f = os.path.join(path,i)
+        file = os.path.join(path,i)
         out = os.path.join(outpath,i)
         output_img = os.path.join(os.path.dirname(outpath),'inputs',i)
-        img = gdal.Open(f)
+        img = gdal.Open(file)
  
         if not os.path.exists(output_img):
             # This line is just to create a copy of the input image into the folder called "inputs"
@@ -85,22 +89,22 @@ for i in tqdm(os.listdir(path)):
             poly = get_bounds(img)
             gdf_water.to_crs(img.GetProjection(),inplace=True)
             gdf_waterways.to_crs(img.GetProjection(),inplace=True)
-            # here we are selecting the geometries that intersects or contains the image
-            g = gdf_water[(gdf_water.intersects(poly) | gdf_water.contains(poly))]
-            g2 = gdf_waterways[(gdf_waterways.intersects(poly) | gdf_waterways.contains(poly))]
+            # here we are selecting the geometries that intersects or contains the image, contains and intersects are functions from "Shapely" library
+            gdf_water_selected = gdf_water[(gdf_water.intersects(poly) | gdf_water.contains(poly))]
+            gdf_waterways_selected = gdf_waterways[(gdf_waterways.intersects(poly) | gdf_waterways.contains(poly))]
             polygons = []
-            if len(g)>0:
+            if len(gdf_water_selected)>0:
                 # If there is polygons inside the image
-                g['dis'] = [0]*len(g)
+                gdf_water_selected['dis'] = [0]*len(gdf_water_selected)
                 # The dissolve function will join all the geometries.
-                g = g.dissolve('dis') 
-                p = g['geometry'][g.index[0]]
+                gdf_water_selected = gdf_water_selected.dissolve('dis') 
+                p = gdf_water_selected['geometry'][gdf_water_selected.index[0]]
                 polygons.append(p)
-            elif len(g2)>0:
-                g2['geometry'] = g2.buffer(10)
-                g2['dis'] = [0]*len(g2)
-                g2 = g2.dissolve('dis')
-                p = g2['geometry'][g2.index[0]]
+            elif len(gdf_waterways_selected)>0:
+                gdf_waterways_selected['geometry'] = gdf_waterways_selected.buffer(10) # Buffer function is better explained in the report.
+                gdf_waterways_selected['dis'] = [0]*len(gdf_waterways_selected)
+                gdf_waterways_selected = gdf_waterways_selected.dissolve('dis')
+                p = gdf_waterways_selected['geometry'][gdf_waterways_selected.index[0]]
                 polygons.append(p)
 
             if len(polygons)>0:
@@ -117,7 +121,7 @@ for i in tqdm(os.listdir(path)):
                 if len(polygons)>1:
                     ggdf = ggdf.dissolve('dis')
                 ggdf.to_file("temp.shp")
-                rasterize(f,'temp.shp',out,'dis')
+                rasterize(file,'temp.shp',out,'dis')
                 os.remove('temp.shp')
 
             else:
