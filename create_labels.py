@@ -13,15 +13,25 @@ outpath = 'datasets/labels'
 water = 'shps/osm/gis_osm_water_a_free_1.shp'
 waterways = 'shps/osm/gis_osm_waterways_free_1.shp'
 
+# this is the dataset of water in polygons of OSM dataset
 gdf_water = gpd.read_file(water)
+# this is the dataset of water in lines of OSM dataset
 gdf_waterways = gpd.read_file(waterways)
 
-def rasterize(img,shp,output,atributo,nodata=''):
+#Function to convert to raster a vector file(e.g. shapefile -> tiff)
+def rasterize(img,shp,output,atribute,nodata=''):
+    # To do this, we need to get the informations from the input image 
+    # Informations like n of pixel in x and y, number of bands, projection, pixel size, etc...
+    # input variables:
+    # -> img: is the base image we will get the information about, we need this to do not need to manually calculate everything.
+    # -> shp: the vector file that will be converted to raster file
+    # -> output: output name 
+    # -> atribute: the columns with the information to convert the data, if you have a column with numbers, the numbers will be converted to pixel values
+    # -> nodata: The values that will be ignored.
     data = gdal.Open(img, gdalconst.GA_ReadOnly)
     geo_transform = data.GetGeoTransform()
     proj=data.GetProjection()
     x_min = geo_transform[0]
-    
     y_max = geo_transform[3]
     x_max = x_min + geo_transform[1] * data.RasterXSize
     y_min = y_max + geo_transform[5] * data.RasterYSize
@@ -37,8 +47,7 @@ def rasterize(img,shp,output,atributo,nodata=''):
         band.SetNoDataValue(nodata)
     band.FlushCache()
     target_ds.SetProjection(proj)
-    gdal.RasterizeLayer(target_ds, [1], mb_l, options=["ATTRIBUTE="+atributo])
-
+    gdal.RasterizeLayer(target_ds, [1], mb_l, options=["ATTRIBUTE="+atribute])
     target_ds = None
 
 def create_img(output,img,array,dtype = gdal.GDT_UInt16):
@@ -52,11 +61,13 @@ def create_img(output,img,array,dtype = gdal.GDT_UInt16):
     dst.FlushCache()
 
 def get_bounds(img):
+    # To get the boundaries of the image
     minx, xres, _, maxy, _, yres  = img.GetGeoTransform()
     maxx = minx + (img.RasterXSize * xres)
     miny = maxy + (img.RasterYSize * yres)
     return Polygon([[minx,maxy],[maxx,maxy],[maxx,miny],[minx,miny]])
 
+# looping through all the images
 for i in tqdm(os.listdir(path)):
     if i.endswith(".tif"):
         f = os.path.join(path,i)
@@ -65,18 +76,24 @@ for i in tqdm(os.listdir(path)):
         img = gdal.Open(f)
  
         if not os.path.exists(output_img):
+            # This line is just to create a copy of the input image into the folder called "inputs"
             create_img(output_img,img,img.ReadAsArray())
 
         if not os.path.exists(out):
+            # the variable "poly" will be the boundaries of the image
+            # the reason to get this is to just select the water bodies of the area we are looking for.
             poly = get_bounds(img)
             gdf_water.to_crs(img.GetProjection(),inplace=True)
             gdf_waterways.to_crs(img.GetProjection(),inplace=True)
+            # here we are selecting the geometries that intersects or contains the image
             g = gdf_water[(gdf_water.intersects(poly) | gdf_water.contains(poly))]
             g2 = gdf_waterways[(gdf_waterways.intersects(poly) | gdf_waterways.contains(poly))]
             polygons = []
             if len(g)>0:
+                # If there is polygons inside the image
                 g['dis'] = [0]*len(g)
-                g = g.dissolve('dis')
+                # The dissolve function will join all the geometries.
+                g = g.dissolve('dis') 
                 p = g['geometry'][g.index[0]]
                 polygons.append(p)
             elif len(g2)>0:
@@ -87,6 +104,7 @@ for i in tqdm(os.listdir(path)):
                 polygons.append(p)
 
             if len(polygons)>0:
+                #Now, we will join all polygons
                 try:
                     waters = MultiPolygon(polygons)
                 except ValueError:
@@ -103,6 +121,7 @@ for i in tqdm(os.listdir(path)):
                 os.remove('temp.shp')
 
             else:
+                # If there is no water bodies, the labeled image will have just 0 values.
                 array = np.zeros((img.RasterXSize,img.RasterYSize))
                 create_img(out,img,[array],gdal.GDT_Byte)
         
